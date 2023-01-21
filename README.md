@@ -1,1 +1,2 @@
-# P1
+# P1/HAN port Arduino Library
+With this library you are able to extract data in OBIS format from a P1/HAN port following DSMR P1 Companion Standard. Software has been developed on ESP32 board, but other bords should work as well but has not been tested. Some additional data is populated along with the extracted data. At this pont only data for Swedish power meters are included.
