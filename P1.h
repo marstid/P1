@@ -10,23 +10,56 @@ Should be generic and able to parse any obis data but only metadata from swedish
 #define P1_H
 #include <Arduino.h>
 
-#define P1_BUFFER_SIZE 1024
+#define P1_BUFFER_SIZE 256
 #define P1_ARRAY_SIZE 2048
-#define P1_PROM_SIZE 5200
-#define P1_JSON_SIZE 3500
+#define OBIS_MAP_SIZE 30 // Size of array holding metadata
+#define P1_MAP_SIZE 30 // Size of array holding p1_records
+
 #define P1_LINES 100
 
-#ifndef P1_SERIAL_BUFFER
-  #define P1_SERIAL_BUFFER 1024
-#endif
-
 #define P1_BAUDRATE 115200
-#define P1_RX 16
-#define P1_TX 17
 
 // Reading from a P1 port signal must be inverted.
 // In testing flip to false
 #define P1_SERIAL_INVERTED true
+
+#if defined(ESP8266)
+#define p1_log(str) Serial.println(F(str));
+#define p1_logf(fmt, args...) Serial.printf(fmt, ##args);
+#define debug_log(str) if(_debug){Serial.println(F(str));}
+#define debug_logf(fmt, args...) if(_debug){Serial.printf(fmt, ##args);}
+
+#define P1_PROM_SIZE 6144
+#define P1_JSON_SIZE 4096
+#define P1_SERIAL_BUFFER 1024
+
+#elif defined(ESP32)
+#define p1_log(str) Serial.println(str);
+#define p1_logf(fmt, args...) Serial.printf(fmt, ##args);
+#define debug_log(str) Serial.println(str);
+#define debug_logf(fmt, args...) Serial.printf(fmt, ##args);
+
+#define P1_PROM_SIZE 6144
+#define P1_JSON_SIZE 4096
+#define P1_RX 16
+#define P1_TX 17
+
+#define P1_SERIAL_BUFFER 1024
+
+#elif 
+#define p1_log(str) Serial.println(str);
+#define p1_logf(fmt, args...) Serial.printf(fmt, ##args);
+#define debug_log(str) Serial.println(str);
+#define debug_logf(fmt, args...) Serial.printf(fmt, ##args);
+
+#define P1_PROM_SIZE 6144
+#define P1_JSON_SIZE 4096
+#define P1_RX 16
+#define P1_TX 17
+
+#define P1_SERIAL_BUFFER 1024
+#endif
+
 
 // Struct to hold collected data
 typedef struct
@@ -35,16 +68,16 @@ typedef struct
   char value[50];
   char unit[10];
   char type[10]; // Metric type
-  char metric[50]; // Metric name
-  char desc[100]; // Description of data
+  char metric[40]; // Metric name
+  char desc[75]; // Description of data
 } p1_record;
 
 // Struct to hold metadata
 typedef struct {
   char obis[12];
   char type[10];
-  char metric[50];
-  char desc[100];
+  char metric[40];
+  char desc[75];
 } obis_map;
 
 class P1 {
@@ -78,11 +111,8 @@ private:
   static char _data[P1_ARRAY_SIZE];
   static bool _debug;
   static char sample[];
-  static char sample2[];
-  static p1_record _p1array[P1_LINES];
-  static obis_map _map[100];
+  static p1_record _p1array[P1_MAP_SIZE];
+  static obis_map _map[OBIS_MAP_SIZE];
 };
-
-
 
 #endif

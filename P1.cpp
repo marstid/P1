@@ -4,7 +4,7 @@
 
 char P1::_data[P1_ARRAY_SIZE];
 bool P1::_debug = false;
-p1_record P1::_p1array[P1_LINES];
+p1_record P1::_p1array[P1_MAP_SIZE];
 char P1::_id[50] = "0";
 
 P1::P1() {
@@ -16,10 +16,8 @@ void P1::begin(Stream &serial) {
 
 void P1::configInfo() {
   Serial.println();
-  Serial.println("-- P1 Configuration");
+  p1_log("-- P1 Configuration")
 
-  Serial.printf("RX: %d\n", P1_RX);
-  Serial.printf("RX: %d\n", P1_TX);
   Serial.printf("P1_BAUDRATE: %d\n", P1_BAUDRATE);
   Serial.printf("P1_BUFFER_SIZE: %d\n", P1_BUFFER_SIZE);
 }
@@ -45,6 +43,7 @@ bool P1::update() {
   return status;
 }
 
+// Private function to list array during dev
 void P1::listArray() {
   int buf_len = sizeof(_p1array) / sizeof(_p1array[0]);
   for (int i = 0; i < buf_len; i++) {
@@ -55,10 +54,9 @@ void P1::listArray() {
   }
 }
 
-// process _p1array and create Prometheus export formatted string
+// Process data to create Prometheus export formatted char*
 bool P1::getPrometheus(char *prom) {
-  char tmp[P1_PROM_SIZE];
-  memset(tmp, 0, P1_PROM_SIZE);
+  memset(prom, 0, P1_PROM_SIZE);
 
   int buf_len = sizeof(_p1array) / sizeof(_p1array[0]);
   for (int i = 0; i < buf_len; i++) {
@@ -67,57 +65,66 @@ bool P1::getPrometheus(char *prom) {
       char help[150] = "";
       char type[150] = "";
       char data[100] = "";
+      #if defined(ESP8266)
       sprintf(help, "# HELP %s %s\n", _p1array[i].metric, _p1array[i].desc);
       sprintf(type, "# TYPE %s %s\n", _p1array[i].metric, _p1array[i].type);
-      sprintf(data, "%s{id=\"%s\", obis=\"%s\", unit=\"%s\"} %s\n", _p1array[i].metric, _id, _p1array[i].obis, _p1array[i].unit, _p1array[i].value);
-      strcat(tmp, help);
-      strcat(tmp, type);
-      strcat(tmp, data);
+      #elif defined(ESP32)
+      sprintf(help, "# HELP %s %s\n", _p1array[i].metric, _p1array[i].desc);
+      sprintf(type, "# TYPE %s %s\n", _p1array[i].metric, _p1array[i].type);
+      #endif
+      
+      sprintf(data, "%s{sensor=\"p1\", id=\"%s\", obis=\"%s\", unit=\"%s\"}%s\n", _p1array[i].metric, _id, _p1array[i].obis, _p1array[i].unit, _p1array[i].value);
+      strcat(prom, help);
+      strcat(prom, type);
+      strcat(prom, data);
     }
   }
+  
+  char buf[100] = "";
+  strcat(prom, "# TYPE esp_heap gauge\n");
+  sprintf(buf, "esp_heap{sensor=\"p1\", id=\"%s\"}%d\n", _id, ESP.getFreeHeap());
+  strcat(prom, buf);
+  
+  strcat(prom, "# TYPE esp_uptime counter\n");
+  sprintf(buf, "esp_uptime{sensor=\"p1\", id=\"%s\"}%d\n", _id, millis());
+  strcat(prom, buf);
+
 
   if (_debug) {
-    Serial.println(tmp);
-    Serial.printf("Size of prometheus[]: %d\n", strlen(tmp));
+    Serial.println(prom);
+    Serial.printf("Size of prometheus[]: %d\n", strlen(prom));
   }
-
-  memset(prom, 0, P1_PROM_SIZE);
-  strcpy(prom, tmp);
   return true;
 }
 
 // process _p1array and create json formatted string
 bool P1::getJson(char *json) {
-  char tmp[P1_JSON_SIZE] = "[";
+  strcpy(json,"[");
   int buf_len = sizeof(_p1array) / sizeof(_p1array[0]);
+  char line[150] = "";
   for (int i = 0; i < buf_len; i++) {
     if (_p1array[i].obis[0] != '\0') {
-      char line[150] = "";
-      sprintf(line, "{id=\"%s\", obis=\"%s\", value:\"%s\", unit=\"%s\", description=\"%s\"},\n", _id, _p1array[i].obis, _p1array[i].value, _p1array[i].unit, _p1array[i].desc);
-      strcat(tmp, line);
+      memset(line,0,150);
+      #if defined(ESP8266)
+      sprintf(line, "{sensor=\"p1\", id=\"%s\", obis=\"%s\", value:\"%s\", unit=\"%s\", description=\"%s\"},\n", _id, _p1array[i].obis, _p1array[i].value, _p1array[i].unit, _p1array[i].desc);
+      #elif defined(ESP32)
+      sprintf(line, "{sensor=\"p1\", id=\"%s\", obis=\"%s\", value:\"%s\", unit=\"%s\", description=\"%s\"},\n", _id, _p1array[i].obis, _p1array[i].value, _p1array[i].unit, _p1array[i].desc);
+      #endif
+      strcat(json, line);
     }
   }
 
   // Remove trailing , and end the array with ]
-  int l = strlen(tmp);
-  tmp[l - 2] = '\0';
-  strcat(tmp, "]");
+  int l = strlen(json);
+  json[l - 2] = '\0';
+  strcat(json, "]");
 
   if (_debug) {
-    Serial.println(tmp);
-    Serial.printf("Size of json[]: %d\n", strlen(tmp));
+    Serial.println(json);
+    Serial.printf("Size of json[]: %d\n", strlen(json));
   }
-
-  memset(json, 0, P1_JSON_SIZE);
-  strcpy(json, tmp);
   return true;
 }
-
-/*##############################################
-
-
-
-##############################################*/
 
 bool P1::getSerialData() {
   if (_debug)
@@ -228,10 +235,10 @@ bool P1::parseData() {
   int nl = 0;
   bool parse = true;
 
-  char buffer[1024];
+  char buffer[256];
 
   while (parse) {
-    memset(buffer, 0, 1024);
+    memset(buffer, 0, 256);
     nl = getLineStart(_data, start, end);
 
     if (nl == -1 || nl == 0) {
@@ -296,43 +303,10 @@ Remeber to set P1_SERIAL_INVERTED to "false"
 */
 
 void P1::txSample() {
-  _serial->println(sample2);
+  _serial->println(sample);
 }
 
-char P1::sample[] = R"(
-/AUX5U123456789
-
-0-0:96.1.0(123456789123456789123456789)
-0-0:1.0.0(230117121355W)
-1-0:1.8.0(001527.646*kWh)
-1-0:2.8.0(000000.000*kWh)
-1-0:3.8.0(000000.393*kvarh)
-1-0:4.8.0(000374.677*kvarh)
-1-0:1.7.0(0000.821*kW)
-1-0:2.7.0(0000.000*kW)
-1-0:3.7.0(0000.000*kvar)
-1-0:4.7.0(0000.320*kvar)
-1-0:21.7.0(0000.233*kW)
-1-0:22.7.0(0000.000*kW)
-1-0:41.7.0(0000.318*kW)
-1-0:42.7.0(0000.000*kW)
-1-0:61.7.0(0000.269*kW)
-1-0:62.7.0(0000.000*kW)
-1-0:23.7.0(0000.000*kvar)
-1-0:24.7.0(0000.117*kvar)
-1-0:43.7.0(0000.000*kvar)
-1-0:44.7.0(0000.124*kvar)
-1-0:63.7.0(0000.000*kvar)
-1-0:64.7.0(0000.079*kvar)
-1-0:32.7.0(230.1*V)
-1-0:52.7.0(229.1*V)
-1-0:72.7.0(232.1*V)
-1-0:31.7.0(001.2*A)
-1-0:51.7.0(001.5*A)
-1-0:71.7.0(001.2*A)
-!94B8)";
-
-char P1::sample2[] = R"(
+char P1::sample[] =  R"(
 /AUX5UXXXXXXXXXXXXX
 
 0-0:96.1.0(123456789123456789123456789123456789)
@@ -365,7 +339,6 @@ char P1::sample2[] = R"(
 1-0:71.7.0(001.1*A)
 !03AB)";
 
-
 // CRC16 - Unknown origin but widely used by other similar projects
 unsigned int P1::P1CRC16(unsigned int crc, unsigned char *buf, int len) {
   for (int pos = 0; pos < len; pos++) {
@@ -393,11 +366,11 @@ Enrich the collected data with some meta data.
 Currently only cotains obis frmo a Swedish meter from Vattenfall
 
 */
-#define MAP_SIZE 100
+
 
 int P1::getMapIndex(char *input) {
   int index = -1;
-  for (int j = 0; j < MAP_SIZE; j++) {
+  for (int j = 0; j < OBIS_MAP_SIZE; j++) {
     if (_map[j].obis[0] != '\0') {
       if (strcmp(_map[j].obis, input) == 0) {
         index = j;
@@ -408,7 +381,7 @@ int P1::getMapIndex(char *input) {
 }
 
 // Map to popluate the extracted data with some additional metadata
-obis_map P1::_map[MAP_SIZE] = {
+obis_map P1::_map[OBIS_MAP_SIZE]  = {
   { "0-0:96.1.0", "gauge", "device_serial", "Device Serial" },
   { "0-0:1.0.0", "gauge", "device_date", "Device Date-time stamp of the P1 message - YYMMDDhhmmss" },
   { "1-0:1.8.0", "counter", "active_energy_positive_total", "Positive active energy (A+) total [kWh]" },

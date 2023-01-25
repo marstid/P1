@@ -1,20 +1,39 @@
+/*
+
+Example that fetch data from P1 in json and prometheus format and then provide that via webserver
+
+
+*/
+
+#include <P1.h>
+
+#if defined(ESP8266)
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+ESP8266WebServer server(80);
+#elif defined(ESP32)
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
-#include <P1.h>
 
+//#define P1_RX 16
+//#define P1_TX 17
 
-const char *ssid = "YourSSIDHere";
-const char *password = "YourPSKHere";
 
 WebServer server(80);
+#endif
+
+const char *ssid = "JUPPI";
+const char *password = "Bajenstreet29";
+
 
 // Defalt values defined in P1.h but can be set in sketch if needed
-#define P1_BAUDRATE 115200
-#define P1_SERIAL_BUFFER 1024
-#define P1_RX 16
-#define P1_TX 17
-//#define P1_SERIAL_INVERTED false // Uncomment if developing with sample data ie running p1.txSample(); in the second loop
+//#define P1_BAUDRATE 115200
+//#define P1_SERIAL_BUFFER 512
+#define P1_SERIAL_INVERTED false  // Uncomment if developing with sample data ie running p1.txSample(); in the second loop
+
+
 
 // Create a local variable to hold data
 char json[P1_JSON_SIZE];
@@ -22,15 +41,15 @@ char prom[P1_PROM_SIZE];
 
 // Manage loop variables
 long last;
-long last2; 
+long last2;
+long last3;
 
-// P1 sends updates every 10s, let's check every 5s if there is a message available
-long interval = 5000;
 
 // Create P1 object
 P1 p1;
 
 void setup() {
+
   Serial.begin(115200);
 
   // Configure WIFI
@@ -39,17 +58,16 @@ void setup() {
   Serial.println("");
 
   // Wait for connection
+  Serial.println("Connecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
-  Serial.println("");
-  Serial.print("Connected to ");
-  Serial.println(ssid);
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("\nConnection established!");
+  Serial.printf("Connected to %s with ip %s\n\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
 
+  // Configure webserver
   server.on("/", handleRoot);
   server.on("/json", handleJson);
   server.on("/metrics", handleProm);
@@ -60,14 +78,32 @@ void setup() {
 
   // Configure P1
   // Set debug to get verbose output. Flip to false once your program works as expected.
-  p1.debug(true);
+  p1.debug(false);
 
   // Set custom identifier for json/prometheus data
-  p1.setId("123");
+  //char id[] = "12345";
+  p1.setId((char *) "12345");
 
-  // Print configuraion info
-  p1.configInfo();
+#if defined(ESP8266)
+  Serial.println("Configuring serial input");
+  delay(10000);
+  // ##### Configure Hardware Serial on a ESP8266
+  Serial.setRxBufferSize(P1_SERIAL_BUFFER);
+  Serial.begin(P1_BAUDRATE, SERIAL_8N1, SERIAL_FULL);
+  Serial.println("Swapping UART0 RX to inverted");
+  Serial.flush();
 
+
+  // Invert the RX serialport by setting a register value, Signal from P1 ports needs to be inverted
+  if (P1_SERIAL_INVERTED) {
+    USC0(UART0) = USC0(UART0) | BIT(UCRXI);
+  }
+
+  // Init P1 with the serial connected to meters P1 port
+  p1.begin(Serial);
+  Serial.println("Serial port is ready to recieve.");
+
+#elif defined(ESP32)
   // ##### Configure Hardware Serial2 on a ESP32
 
   //Serial bugffer size - This need to be set before Serial2.begin() to take effect
@@ -80,8 +116,12 @@ void setup() {
 
   // Init P1 with the serial connected to meters P1 port
   p1.begin(Serial2);
+#endif
 
   Serial.println("\n\nSetup completed...");
+
+
+  Serial.printf("Free heap: %d\n", ESP.getFreeHeap());
 }
 
 // Web content
@@ -116,6 +156,7 @@ void handleJson() {
 }
 
 void handleProm() {
+
   server.send(200, "text/plain", prom);
 }
 
@@ -139,8 +180,8 @@ void handleNotFound() {
 void loop() {
   server.handleClient();
 
-  // Non blocking timer will update P1 values and data objects every 10s
-  if (millis() - last > interval) {
+  // Non blocking timer will update P1 values and data objects every 2 second
+  if (millis() - last > 2000L) {
     if (p1.update()) {
       Serial.println("Update successful!");
       // new values fetched, let's update the local variables
@@ -153,8 +194,17 @@ void loop() {
   }
 
   // Non blocking timer used when sending mock data
-  if (millis() - last2 > 10000L) {
- //   p1.txSample();  // Connect a cable between RX & TX and uncomment to send sample data during development
+  if (millis() - last2 > 5000L) {
+    //   p1.txSample();  // Connect a cable between RX & TX and uncomment to send sample data during development and remember to disable signal invert
     last2 = millis();
+  }
+
+  // Check that WIFI is still connected
+  if ((WiFi.status() != WL_CONNECTED) && (millis() - last3 > 60000L)) {
+    Serial.print(millis());
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    last3 = millis();
   }
 }
