@@ -56,7 +56,11 @@ void P1::listArray() {
 
 // Process data to create Prometheus export formatted char*
 bool P1::getPrometheus(char *prom) {
-  memset(prom, 0, P1_PROM_SIZE);
+  strcpy(prom,"");
+  //memset(prom, 0, P1_PROM_SIZE);
+  if (_debug) {
+    Serial.printf("Init Size of prometheus[]: %d\n", strlen(prom));
+  }
 
   int buf_len = sizeof(_p1array) / sizeof(_p1array[0]);
   for (int i = 0; i < buf_len; i++) {
@@ -79,16 +83,31 @@ bool P1::getPrometheus(char *prom) {
       strcat(prom, data);
     }
   }
-  
-  char buf[100] = "";
-  strcat(prom, "# TYPE esp_heap gauge\n");
-  sprintf(buf, "esp_heap{sensor=\"p1\", id=\"%s\"}%d\n", _id, ESP.getFreeHeap());
+  char buf[150] = "";
+  #if defined(ESP8266)
+  strcat(prom, "# TYPE sensor_heap gauge\n");
+  sprintf(buf, "sensor_heap_free{sensor=\"p1\", id=\"%s\"}%d\n", _id, ESP.getFreeHeap());
   strcat(prom, buf);
-  
-  strcat(prom, "# TYPE esp_uptime counter\n");
-  sprintf(buf, "esp_uptime{sensor=\"p1\", id=\"%s\"}%d\n", _id, millis());
+  strcat(prom, "# TYPE sensor_uptime counter\n");
+  sprintf(buf, "sensor_uptime{sensor=\"p1\", id=\"%s\"}%d\n", _id, millis());
+  strcat(prom, buf);
+  float volt = (float) ESP.getVcc()/1000L;
+  strcat(prom, "# TYPE sensor_voltage gauge\n");
+  sprintf(buf, "sensor_voltage{sensor=\"p1\", id=\"%s\"}%.2f\n", _id, volt);
   strcat(prom, buf);
 
+  #elif defined(ESP32)
+  strcat(prom, "# TYPE sensor_heap_free gauge\n");
+  sprintf(buf, "sensor_heap_free{sensor=\"p1\", id=\"%s\"}%d\n", _id, ESP.getFreeHeap());
+  strcat(prom, buf);
+  strcat(prom, "# TYPE sensor_heap_total gauge\n");
+  sprintf(buf, "sensor_heap_total{sensor=\"p1\", id=\"%s\"}%d\n", _id, ESP.getHeapSize());
+  strcat(prom, buf);
+  strcat(prom, "# TYPE sensor_uptime counter\n");
+  sprintf(buf, "sensor_uptime{sensor=\"p1\", id=\"%s\"}%d\n", _id, millis());
+  strcat(prom, buf);
+  #elif
+  #endif
 
   if (_debug) {
     Serial.println(prom);
@@ -101,16 +120,18 @@ bool P1::getPrometheus(char *prom) {
 bool P1::getJson(char *json) {
   strcpy(json,"[");
   int buf_len = sizeof(_p1array) / sizeof(_p1array[0]);
-  char line[150] = "";
+  char line[200] = "";
   for (int i = 0; i < buf_len; i++) {
     if (_p1array[i].obis[0] != '\0') {
-      memset(line,0,150);
+      strcpy(line, "");
+      //memset(line,0,150);
       #if defined(ESP8266)
       sprintf(line, "{sensor=\"p1\", id=\"%s\", obis=\"%s\", value:\"%s\", unit=\"%s\", description=\"%s\"},\n", _id, _p1array[i].obis, _p1array[i].value, _p1array[i].unit, _p1array[i].desc);
+      strcat(json, line);
       #elif defined(ESP32)
       sprintf(line, "{sensor=\"p1\", id=\"%s\", obis=\"%s\", value:\"%s\", unit=\"%s\", description=\"%s\"},\n", _id, _p1array[i].obis, _p1array[i].value, _p1array[i].unit, _p1array[i].desc);
-      #endif
       strcat(json, line);
+      #endif
     }
   }
 
@@ -121,7 +142,7 @@ bool P1::getJson(char *json) {
 
   if (_debug) {
     Serial.println(json);
-    Serial.printf("Size of json[]: %d\n", strlen(json));
+    Serial.printf("Size of json: %d\n", strlen(json));
   }
   return true;
 }
@@ -185,7 +206,9 @@ bool P1::getSerialData() {
       return true;
 
     } else {
-      Serial.printf("P1::%s() - CRC INVALID. Recieved: %x, Calculated: %x\n", __func__, strtol(crc, NULL, 16), currentCRC);
+      if (_debug) {
+        Serial.printf("P1::%s() - CRC INVALID. Recieved: %x, Calculated: %x\n", __func__, strtol(crc, NULL, 16), currentCRC);
+      }
       return false;
     }
   } else {
